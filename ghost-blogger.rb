@@ -8,6 +8,13 @@ require 'time'
 $all_tags = Set.new()
 $all_posts = []
 
+# All Ghost timestamps are integer milliseconds
+class Time
+    def millis
+        return (self.to_f * 1000).to_i
+    end
+end
+
 def wrap_content_html_in_mobiledoc(content)
     html_str = content.text
     md = {'version' => '0.3.1', 'markups' => [], 'atoms' => [], 'sections' => [[10, 0]]}
@@ -26,12 +33,12 @@ class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :tags, :content)
         hsh['featured'] = 0
         hsh['page'] = 0
         hsh['status'] = 'published'
-        hsh['published_at'] = (pub_ts.to_f * 1000).to_i
+        hsh['published_at'] = pub_ts.millis
         hsh['published_by'] = 1
         hsh['author_id'] = 1
-        hsh['created_at'] = (pub_ts.to_f * 1000).to_i
+        hsh['created_at'] = pub_ts.millis
         hsh['created_by'] = 1
-        hsh['updated_at'] = (update_ts.to_f * 1000).to_i
+        hsh['updated_at'] = update_ts.millis
         hsh['updated_by'] = 1
 
         return hsh.to_json(*args)
@@ -59,7 +66,7 @@ class EntryHandler < Struct.new(:entry)
         new_post_idx = $all_posts.length + 1  # posts are 1-indexed.
         post = Post.new(new_post_idx, title, pub_ts, update_ts, tags, content)
 
-        $all_posts << post unless $all_posts.length >= 5
+        $all_posts << post
     end
 end
 
@@ -71,4 +78,12 @@ Nokogiri::XML::Reader(File.open(ARGV[0])).each {
     end
 }
 
-puts JSON::pretty_generate($all_posts)
+# test mode
+$all_posts = $all_posts[-5...-1]
+
+# FIXME: tags + tag-to-post associations.
+data = {'posts' => $all_posts, 'tags' => [], 'posts_tags' => []}
+outer = {'meta' => {'exported_on' => Time.now.millis, 'version' => '4.0.0'},
+         'data' => data}
+
+puts JSON::pretty_generate(outer)
