@@ -8,11 +8,21 @@ require 'time'
 $all_tags = Set.new()
 $all_posts = []
 
+def wrap_content_html_in_mobiledoc(content)
+    html_str = content.text
+    md = {'version' => '0.3.1', 'markups' => [], 'atoms' => [], 'sections' => [[10, 0]]}
+    md['cards'] = [['html', {'cardName' => 'html', 'html' => html_str}]]
+
+    return md
+end
+
 class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :tags, :content)
     def to_json(*args)
         hsh = {}
         hsh['id'] = post_idx
-        hsh['title'] = :title
+        hsh['title'] = title.text
+        hsh['mobiledoc'] = wrap_content_html_in_mobiledoc(content)
+
         hsh['featured'] = 0
         hsh['page'] = 0
         hsh['status'] = 'published'
@@ -44,8 +54,7 @@ class EntryHandler < Struct.new(:entry)
         tags = entry.css('entry category[scheme="http://www.blogger.com/atom/ns#"]')
         tags = tags.map {|tag_node| tag_node['term']}
         $all_tags << tags
-        content = entry.at_css('entry content').text
-        content = 'content would go here.'
+        content = entry.at_css('entry content')
 
         new_post_idx = $all_posts.length + 1  # posts are 1-indexed.
         post = Post.new(new_post_idx, title, pub_ts, update_ts, tags, content)
