@@ -5,6 +5,8 @@ require 'nokogiri'
 require 'set'
 require 'time'
 
+$settings = {:publish => false, :wrap_html_in_mobiledoc => false}
+
 $all_tags = Set.new()
 $all_posts = []
 
@@ -28,18 +30,27 @@ class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :tags, :content)
         hsh = {}
         hsh['id'] = post_idx
         hsh['title'] = title.text
-        hsh['mobiledoc'] = wrap_content_html_in_mobiledoc(content)
+        if $settings[:wrap_html_in_mobiledoc]
+            hsh['mobiledoc'] = wrap_content_html_in_mobiledoc(content).to_json
+        else
+            hsh['html'] = content.text
+        end
 
         hsh['featured'] = 0
         hsh['page'] = 0
-        hsh['status'] = 'published'
-        hsh['published_at'] = pub_ts.millis
-        hsh['published_by'] = 1
         hsh['author_id'] = 1
         hsh['created_at'] = pub_ts.millis
         hsh['created_by'] = 1
         hsh['updated_at'] = update_ts.millis
         hsh['updated_by'] = 1
+
+        if $settings[:publish]
+            hsh['status'] = 'published'
+            hsh['published_at'] = pub_ts.millis
+            hsh['published_by'] = 1
+        else
+            hsh['status'] = 'draft'
+        end
 
         return hsh.to_json(*args)
     end
@@ -79,7 +90,7 @@ Nokogiri::XML::Reader(File.open(ARGV[0])).each {
 }
 
 # test mode
-$all_posts = $all_posts[-5...-1]
+$all_posts = $all_posts[-2..-1]
 
 # FIXME: tags + tag-to-post associations.
 data = {'posts' => $all_posts, 'tags' => [], 'posts_tags' => []}
