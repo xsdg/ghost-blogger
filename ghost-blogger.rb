@@ -25,7 +25,7 @@ def wrap_content_html_in_mobiledoc(content)
     return md
 end
 
-class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :tags, :content)
+class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :slug_tag, :tags, :content)
     def to_json(*args)
         hsh = {}
         hsh['id'] = post_idx
@@ -34,6 +34,15 @@ class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :tags, :content)
             hsh['mobiledoc'] = wrap_content_html_in_mobiledoc(content).to_json
         else
             hsh['html'] = content.text
+        end
+
+        if slug_tag
+            orig_url = slug_tag['href']
+            if orig_url =~ %r{/([^/]+)\.html}
+                hsh['slug'] = $1
+            else
+                $stderr.puts "Failed to parse orig_url: \"#{orig_url}\" for post #{title.text}"
+            end
         end
 
         hsh['featured'] = 0
@@ -69,13 +78,14 @@ class EntryHandler < Struct.new(:entry)
         update_node = entry.at_css('entry updated')
         update_ts = Time.parse(update_node.text)
 
+        slug_tag = entry.at_css('entry link[rel="alternate"]')
         tags = entry.css('entry category[scheme="http://www.blogger.com/atom/ns#"]')
         tags = tags.map {|tag_node| tag_node['term']}
         $all_tags << tags
         content = entry.at_css('entry content')
 
         new_post_idx = $all_posts.length + 1  # posts are 1-indexed.
-        post = Post.new(new_post_idx, title, pub_ts, update_ts, tags, content)
+        post = Post.new(new_post_idx, title, pub_ts, update_ts, slug_tag, tags, content)
 
         $all_posts << post
     end
