@@ -100,7 +100,7 @@ Nokogiri::XML::Reader(File.open(ARGV[0])).each {
 }
 
 # test mode
-$all_posts = $all_posts[-2..-1]
+$all_posts = $all_posts[1..3]
 
 # FIXME: tags + tag-to-post associations.
 data = {'posts' => $all_posts, 'tags' => [], 'posts_tags' => []}
