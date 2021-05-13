@@ -7,6 +7,7 @@ require 'net/http'
 require 'uri'
 
 $image_root = File.new('exported_content/downloaded_images')
+$settings = {:overwrite_cached_imgs => false}
 
 full_doc = JSON::parse(File.read(ARGV[0]))
 all_posts = full_doc['data']['posts']
@@ -26,7 +27,11 @@ def cache_file_locally(uri, local_filename)
                     return
                 else
                     $stderr.puts "Length mismatch for #{uri}: local file size #{local_file_size} vs canonical #{canonical_length}"
-                    raise "mismatch"
+                    if $settings[:overwrite_cached_imgs]
+                        $stderr.puts "overwriting local file"
+                    else
+                        raise "Local image cache collision and overwrites are disabled"
+                    end
                 end
             }
         end
