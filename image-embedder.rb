@@ -7,10 +7,8 @@ require 'net/http'
 require 'uri'
 
 $image_root = File.new('exported_content/downloaded_images')
-$settings = {:overwrite_cached_imgs => false}
+$settings = {:overwrite_cached_imgs => true}
 
-full_doc = JSON::parse(File.read(ARGV[0]))
-all_posts = full_doc['data']['posts']
 
 def cache_file_locally(uri, local_filename)
     Net::HTTP.start(uri.host) {
@@ -50,9 +48,13 @@ def cache_file_locally(uri, local_filename)
     }
 end
 
+
+full_doc = JSON::parse(File.read(ARGV[0]))
+all_posts = full_doc['data']['posts']
+
 all_posts.each {
     |post|
-    puts "#{post['slug']}:"
+    $stderr.puts "#{post['slug']}:"
     parsed_mobiledoc = JSON.parse(post['mobiledoc'])
 
     image_dir = File.join($image_root, post['slug'])
@@ -67,10 +69,14 @@ all_posts.each {
         cache_file_locally(uri, cachename)
         card['src'] = cachename.sub(/exported_content/, '/content/images')
 
-        puts "  #{uri}"
-        puts "  -> #{cachename}"
-        puts "  new src #{card['src']}"
+        $stderr.puts "  #{uri}"
+        $stderr.puts "  -> #{cachename}"
+        $stderr.puts "  new src #{card['src']}"
+
         sleep(0.2)
     }
-    exit
+
+    post['mobiledoc'] = JSON::generate(parsed_mobiledoc)
 }
+
+puts all_posts
