@@ -60,8 +60,11 @@ all_posts.each {
         uri = URI(card['src'])
 
         cache_file_locally(uri, cachename)
+        card['src'] = cachename.sub(/exported_content/, '/content/images')
 
-        puts "  #{uri} -> #{cachename}"
+        puts "  #{uri}"
+        puts "  -> #{cachename}"
+        puts "  new src #{card['src']}"
         sleep(0.2)
     }
     exit
