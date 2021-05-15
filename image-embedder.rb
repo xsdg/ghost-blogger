@@ -6,7 +6,9 @@ require 'json'
 require 'net/http'
 require 'uri'
 
-$image_root = File.new('exported_content/downloaded_images')
+image_root_path = 'exported_content/downloaded_images'
+FileUtils.makedirs(image_root_path)
+$image_root = Dir.new(image_root_path)
 $settings = {:overwrite_cached_imgs => true}
 
 
@@ -79,4 +81,4 @@ all_posts.each {
     post['mobiledoc'] = JSON::generate(parsed_mobiledoc)
 }
 
-puts all_posts
+puts JSON::pretty_generate(full_doc)
