@@ -9,7 +9,7 @@ require 'uri'
 image_root_path = 'exported_content/downloaded_images'
 FileUtils.makedirs(image_root_path)
 $image_root = Dir.new(image_root_path)
-$settings = {:overwrite_cached_imgs => true}
+$settings = {:overwrite_cached_imgs => true, :duplicate_featured_img => true}
 
 
 def cache_file_locally(uri, local_filename)
@@ -59,10 +59,11 @@ all_posts.each {
     $stderr.puts "#{post['slug']}:"
     parsed_mobiledoc = JSON.parse(post['mobiledoc'])
 
+    feature_idx = nil
     image_dir = File.join($image_root, post['slug'])
     FileUtils.makedirs(image_dir)
-    parsed_mobiledoc['cards'].each {
-        |(type, card)|
+    parsed_mobiledoc['cards'].each_with_index {
+        |(type, card), card_idx|
         next unless type == 'image'
         filename = File.basename(card['src'])
         cachename = File.join(image_dir, filename)
@@ -70,6 +71,9 @@ all_posts.each {
 
         cache_file_locally(uri, cachename)
         card['src'] = cachename.sub(/exported_content/, '/content/images')
+        card['cardWidth'] = 'wide'  # Non-empty options are "wide" or "full".
+
+        feature_idx ||= card_idx
 
         $stderr.puts "  #{uri}"
         $stderr.puts "  -> #{cachename}"
@@ -77,6 +81,14 @@ all_posts.each {
 
         sleep(0.2)
     }
+
+    if feature_idx
+        feature_card = (if $settings[:duplicate_featured_image]
+                        then parsed_mobiledoc['cards'][feature_idx]
+                        else parsed_mobiledoc['cards'].delete_at(feature_idx)
+                        end)
+        post['feature_image'] = feature_card.last['src'].sub('exported_content', '')
+    end
 
     post['mobiledoc'] = JSON::generate(parsed_mobiledoc)
 }
