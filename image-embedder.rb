@@ -6,10 +6,10 @@ require 'json'
 require 'net/http'
 require 'uri'
 
-image_root_path = 'exported_content/downloaded_images'
+image_root_path = 'exported_content/migrated_images'
 FileUtils.makedirs(image_root_path)
 $image_root = Dir.new(image_root_path)
-$settings = {:overwrite_cached_imgs => true, :duplicate_featured_img => true}
+$settings = {:overwrite_cached_imgs => true, :duplicate_featured_img => true, :year_month_subdirs => true}
 
 
 def cache_file_locally(uri, local_filename)
@@ -51,6 +51,16 @@ def cache_file_locally(uri, local_filename)
 end
 
 
+def image_dir_for_post(post)
+    built_path = $image_root.dup
+    if $settings[:year_month_subdirs]
+        post_ts = Time.at(post['created_at'] / 1e3)
+        built_path = File.join(built_path, post_ts.strftime('%Y/%m'))
+    end
+    return File.join(built_path, post['slug'])
+end
+
+
 full_doc = JSON::parse(File.read(ARGV[0]))
 all_posts = full_doc['data']['posts']
 
@@ -60,7 +70,7 @@ all_posts.each {
     parsed_mobiledoc = JSON.parse(post['mobiledoc'])
 
     feature_idx = nil
-    image_dir = File.join($image_root, post['slug'])
+    image_dir = image_dir_for_post(post)
     FileUtils.makedirs(image_dir)
     parsed_mobiledoc['cards'].each_with_index {
         |(type, card), card_idx|
@@ -70,6 +80,10 @@ all_posts.each {
         uri = URI(card['src'])
 
         cache_file_locally(uri, cachename)
+        # Matches medium_to_ghost/medium_post_parser.py, which notes:
+        # TODO: Fix this when Ghost fixes https://github.com/TryGhost/Ghost/issues/9821
+        # Ghost 2.0.3 has a bug where it doesn't update imported image paths, so manually add
+        # /content/images.
         card['src'] = cachename.sub(/exported_content/, '/content/images')
         card['cardWidth'] = 'wide'  # Non-empty options are "wide" or "full".
 
@@ -87,6 +101,8 @@ all_posts.each {
                         then parsed_mobiledoc['cards'][feature_idx]
                         else parsed_mobiledoc['cards'].delete_at(feature_idx)
                         end)
+        # Matches medium_to_ghost/medium_post_parser.py, which notes:
+        # Confusingly, post images ARE updated correctly in 2.0.3, so this path is different
         post['feature_image'] = feature_card.last['src'].sub('exported_content', '')
     end
 
