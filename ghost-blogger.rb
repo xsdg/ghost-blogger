@@ -5,7 +5,8 @@ require 'nokogiri'
 require 'set'
 require 'time'
 
-$settings = {:publish => false, :wrap_html_in_mobiledoc => false}
+$settings = Hash.new{|h,k| raise "Unknown settings key #{k}"}
+$settings.merge!({:publish => false, :wrap_html_in_mobiledoc => false})
 
 $all_tags = Set.new()
 $all_posts = []
@@ -80,8 +81,8 @@ class EntryHandler < Struct.new(:entry)
 
         slug_tag = entry.at_css('entry link[rel="alternate"]')
         tags = entry.css('entry category[scheme="http://www.blogger.com/atom/ns#"]')
-        tags = tags.map {|tag_node| tag_node['term']}
-        $all_tags << tags
+        tags = tags.map {|tag_node| tag_node['term'].gsub(/^"|"$/, '')}
+        $all_tags |= tags
         content = entry.at_css('entry content')
 
         new_post_idx = $all_posts.length + 1  # posts are 1-indexed.
@@ -100,10 +101,25 @@ Nokogiri::XML::Reader(File.open(ARGV[0])).each {
 }
 
 # test mode
-$all_posts = $all_posts[-3..-1]
+$all_posts = $all_posts[-3..-2] + $all_posts[30..31]
 
-# FIXME: tags + tag-to-post associations.
-data = {'posts' => $all_posts, 'tags' => [], 'posts_tags' => []}
+tag_idx = {}
+$all_tags.sort.each_with_index {
+    |tag, idx|
+    tag_idx[tag] = {'id' => idx, 'name' => tag}
+}
+posts_tags = []
+$all_posts.each {
+    |post|
+    post['tags'].each {
+        |tag|
+        pt_pair = {'tag_id' => tag_idx[tag]['id'], 'post_id' => post.post_idx}
+        posts_tags << pt_pair
+    }
+}
+
+data = {'posts' => $all_posts, 'tags' => tag_idx.values,
+        'posts_tags' => posts_tags}
 outer = {'meta' => {'exported_on' => Time.now.millis, 'version' => '4.0.0'},
          'data' => data}
 
