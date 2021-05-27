@@ -2,21 +2,64 @@
 
 require 'json'
 require 'nokogiri'
+require 'optparse'
 require 'set'
 require 'time'
 
-$settings = Hash.new{|h,k| raise "Unknown settings key #{k}"}
-$settings.merge!({:publish => false, :wrap_html_in_mobiledoc => false})
 
-$all_tags = Set.new()
-$all_posts = []
-
-# All Ghost timestamps are integer milliseconds
+# All Ghost timestamps are integer milliseconds.
 class Time
     def millis
         return (self.to_f * 1000).to_i
     end
 end
+
+
+# Settings and options parsing.
+$settings = (Struct.new(:publish, :verbose, :wrap_html_in_mobiledoc,
+                        :process_ranges)).new()
+$settings.process_ranges = []
+
+OptionParser.new {
+    |opts|
+    opts.banner = 'Usage: example.rb [options]'
+
+    opts.on('-pRANGE', '--process=RANGE',
+            'Which post indices to process.  Each value should either be a ' +
+            'single index, or a ruby-style inclusive or exclusive range.  ' +
+            'May be repeated.') {
+        |opt|
+        if opt =~ /^(-?\d+)$/
+            n = $1.to_i
+            $settings.process_ranges << Range.new(n, n)
+        elsif opt =~ /^(-?\d+)\.\.(-?\d+)$/
+            $settings.process_ranges << Range.new($1.to_i, $2.to_i, exclude_end=false)
+        elsif opt =~ /^(-?\d+)\.\.\.(-?\d+)$/
+            $settings.process_ranges << Range.new($1.to_i, $2.to_i, exclude_end=true)
+        else
+            raise "Failed to parse --process range \"#{opt}\""
+        end
+    }
+
+    opts.on('--[no-]publish', 'Whether to mark posts as published or draft') {
+        |opt|
+        $settings.publish = opt
+    }
+
+    opts.on("-v", "--[no-]verbose", "Run verbosely") {
+        |opt|
+        $settings.verbose = opt
+    }
+
+    opts.on('--[no-]wrap_html_in_mobiledoc',
+            'If specified, wrap the HTML in a single HTML card in mobiledoc. ' +
+            'Otherwise, use the "html" field with the expectation of using ' +
+            'Ghost\'s migration tool') {
+        |opt|
+        $settings.wrap_html_in_mobiledoc = opt
+    }
+}.parse!
+
 
 def wrap_content_html_in_mobiledoc(content)
     html_str = content.text
@@ -82,7 +125,6 @@ class EntryHandler < Struct.new(:entry)
         slug_tag = entry.at_css('entry link[rel="alternate"]')
         tags = entry.css('entry category[scheme="http://www.blogger.com/atom/ns#"]')
         tags = tags.map {|tag_node| tag_node['term'].gsub(/^"|"$/, '')}
-        $all_tags |= tags
         content = entry.at_css('entry content')
 
         new_post_idx = $all_posts.length + 1  # posts are 1-indexed.
@@ -92,6 +134,9 @@ class EntryHandler < Struct.new(:entry)
     end
 end
 
+
+# Actually start parsing the input file
+$all_posts = []
 Nokogiri::XML::Reader(File.open(ARGV[0])).each {
     |node|
     if node.name == 'entry' and node.node_type == Nokogiri::XML::Reader::TYPE_ELEMENT
@@ -100,9 +145,24 @@ Nokogiri::XML::Reader(File.open(ARGV[0])).each {
     end
 }
 
-# test mode
-$all_posts = $all_posts[-3..-2] + $all_posts[30..31]
+# Potentially limits which posts are included.
+unless $settings.process_ranges.empty?
+    restricted_posts = []
+    $settings.process_ranges.each {
+        |range|
+        restricted_posts += $all_posts[range]
+    }
+    $all_posts = restricted_posts
+end
 
+# Find tags from the possibly-restricted set of posts.
+$all_tags = Set.new()
+$all_posts.each {
+    |post|
+    $all_tags |= post.tags
+}
+
+# Generate the post-index-to-tag-index mapping.
 tag_idx = {}
 $all_tags.sort.each_with_index {
     |tag, idx|
@@ -118,9 +178,18 @@ $all_posts.each {
     }
 }
 
+# Pack everything up in a box.
+$stderr.puts "Processed #{$all_posts.size} posts and #{$all_tags.size} tags"
+if $settings.verbose
+    $all_posts.each {
+        |post|
+        $stderr.puts "  #{post.title}"
+    }
+end
+
 data = {'posts' => $all_posts, 'tags' => tag_idx.values,
         'posts_tags' => posts_tags}
-outer = {'meta' => {'exported_on' => Time.now.millis, 'version' => '4.0.0'},
+outer = {'meta' => {'exported_on' => Time.now.millis, 'version' => '4.4.0'},
          'data' => data}
 
 puts JSON::pretty_generate(outer)
