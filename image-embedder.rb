@@ -7,16 +7,62 @@
 require 'fileutils'
 require 'json'
 require 'net/http'
+require 'optparse'
 require 'uri'
 
-image_root_path = 'exported_content/migrated_images'
-FileUtils.makedirs(image_root_path)
-$image_root = Dir.new(image_root_path)
-$settings = Hash.new{|h,k| raise "Unknown settings key #{k}"}
-$settings.merge!({:overwrite_cached_imgs => true,
-                  :duplicate_featured_image => true,
-                  :year_month_subdirs => true})
+# Settings and options parsing.
+$settings = (Struct.new(:overwrite_cached_imgs, :duplicate_feature_img,
+                        :year_month_subdirs, :image_root_path, :verbose)).new()
+# Defaults
+$settings.overwrite_cached_imgs = false
+$settings.duplicate_feature_img = true
+$settings.year_month_subdirs = true
+$settings.image_root_path = 'exported_content/migrated_images'
 
+OptionParser.new {
+    |opts|
+    opts.banner = 'Usage: example.rb [options]'
+
+    opts.on('--[no-]duplicate_feature_img',
+            'Whether to keep the opening image when setting it as the ' +
+            'feature image.  Without customization, this will often lead to ' +
+            'the image appearing twice at the start of each post.') {
+        |opt|
+        $settings.duplicate_feature_img = opt
+    }
+
+    opts.on('-oDIR', '--output_dir=DIR', 'Output directory for cached images') {
+        |opt|
+        $settings.image_root_path = File.join(opt, 'migrated_images')
+    }
+
+    opts.on('--[no-]overwrite_cached_imgs',
+            'Whether to overwrite mismatching previously-cached images') {
+        |opt|
+        $settings.overwrite_cached_imgs = opt
+    }
+
+    opts.on("-v", "--[no-]verbose", "Run verbosely") {
+        |opt|
+        $settings.verbose = opt
+    }
+
+    opts.on('--[no-]year_month_subdirs',
+            'Whether to bucket images by year and month, in addition to post ' +
+            'slug.') {
+        |opt|
+        $settings.year_month_subdirs = opt
+    }
+}.parse!
+
+
+FileUtils.makedirs($settings.image_root_path)
+$image_root = Dir.new($settings.image_root_path)
+def debug(*args)
+    if $settings.verbose
+        $stderr.puts(*args)
+    end
+end
 
 def cache_file_locally(uri, local_filename)
     Net::HTTP.start(uri.host) {
@@ -29,22 +75,24 @@ def cache_file_locally(uri, local_filename)
                 |response|
                 canonical_length = response['Content-Length'].to_i
                 if local_file_size == canonical_length
-                    $stderr.puts "Skipping download of #{uri}; local file is complete"
+                    debug "  Skipping download of #{uri}; local file is complete"
                     return
                 else
-                    $stderr.puts "Length mismatch for #{uri}: local file size #{local_file_size} vs canonical #{canonical_length}"
-                    if $settings[:overwrite_cached_imgs]
-                        $stderr.puts "overwriting local file"
+                    size_desc = "local #{local_file_size} versus canonical #{canonical_length}"
+                    if $settings.overwrite_cached_imgs
+                        debug "    Re-caching #{uri}: #{size_desc}"
                     else
-                        raise "Local image cache collision and overwrites are disabled"
+                        raise "Local cache collision and overwrites are disabled: #{size_desc} for #{uri}"
                     end
                 end
             }
         end
 
         # Download and write to local_filename.
-        $stderr.print("  Fetching #{uri}…")
-        $stderr.flush()
+        if $settings.verbose
+            $stderr.print "  Fetching #{uri}…"
+            $stderr.flush()
+        end
         http.request_get(uri.path) {
             |response|
             File.open(local_filename, 'w') {
@@ -52,14 +100,14 @@ def cache_file_locally(uri, local_filename)
                 local_file.write(response.body())
             }
         }
-        $stderr.puts(" done!")
+        debug " done!"
     }
 end
 
 
 def image_dir_for_post(post)
     built_path = $image_root
-    if $settings[:year_month_subdirs]
+    if $settings.year_month_subdirs
         post_ts = Time.at(post['created_at'] / 1e3)
         built_path = File.join(built_path, post_ts.strftime('%Y/%m'))
     end
@@ -95,14 +143,14 @@ all_posts.each {
 
         feature_idx ||= card_idx
 
-        $stderr.puts "    -> #{cachename}"
-        $stderr.puts "    new src #{card['src']}"
+        debug "    -> #{cachename}"
+        debug "    new src #{card['src']}"
 
         sleep(0.2)
     }
 
     if feature_idx
-        feature_card = (if $settings[:duplicate_featured_image]
+        feature_card = (if $settings.duplicate_feature_img
                         then parsed_mobiledoc['cards'][feature_idx]
                         else parsed_mobiledoc['cards'].delete_at(feature_idx)
                         end)
