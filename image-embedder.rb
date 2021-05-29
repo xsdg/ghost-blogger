@@ -12,10 +12,12 @@ require 'uri'
 
 # Settings and options parsing.
 $settings = (Struct.new(:overwrite_cached_imgs, :duplicate_feature_img,
-                        :year_month_subdirs, :image_root_path, :verbose)).new()
+                        :year_month_subdirs, :image_root_path, :verbose,
+                        :skip_cached_imgs)).new()
 # Defaults
-$settings.overwrite_cached_imgs = false
 $settings.duplicate_feature_img = true
+$settings.overwrite_cached_imgs = false
+$settings.skip_cached_imgs = false
 $settings.year_month_subdirs = true
 $settings.image_root_path = 'content/migrated_images'
 
@@ -43,6 +45,12 @@ OptionParser.new {
         $settings.overwrite_cached_imgs = opt
     }
 
+    opts.on('--[no-]skip_cached_imgs',
+            'Whether to assumed existing images are correct without verifying file size') {
+        |opt|
+        $settings.skip_cached_imgs = opt
+    }
+
     opts.on("-v", "--[no-]verbose", "Run verbosely") {
         |opt|
         $settings.verbose = opt
@@ -65,9 +73,44 @@ def debug(*args)
     end
 end
 
-def cache_file_locally(uri, local_filename)
-    Net::HTTP.start(uri.host) {
-        |http|
+
+class LocalFileCacher
+    def initialize
+        @connections = {}
+    end
+
+    def start_new_connection(hostname)
+        http = Net::HTTP.new(hostname)
+        @connections[hostname] = http
+        http.start
+        return http
+    end
+
+    def connection_for_uri(uri)
+        unless @connections.has_key? uri.hostname
+            return start_new_connection(uri.hostname)
+        end
+
+        # FIXME: Any way to determine if this connection is still up?
+        old_http = @connections[uri.hostname]
+        return old_http
+    end
+
+    def finish_all()
+        @connections.each {
+            |hostname, http|
+            http.finish()
+        }
+        @connections.clear()
+    end
+
+    def cache_file_locally(uri, local_filename)
+        if $settings.skip_cached_imgs and File.exists?(local_filaname)
+            debug "  File exists locally; skipping…"
+            return
+        end
+
+        http = connection_for_uri(uri)
         if File.exists?(local_filename)
             # Skip downloading if cached file length is as expected.
             local_file_size = File.size(local_filename)
@@ -102,7 +145,7 @@ def cache_file_locally(uri, local_filename)
             }
         }
         debug " done!"
-    }
+    end
 end
 
 
@@ -118,6 +161,7 @@ end
 
 full_doc = JSON::parse(File.read(ARGV[0]))
 all_posts = full_doc['data']['posts']
+cacher = LocalFileCacher.new()
 
 all_posts.each {
     |post|
@@ -134,7 +178,7 @@ all_posts.each {
         cachename = File.join(image_dir, filename)
         uri = URI(card['src'])
 
-        cache_file_locally(uri, cachename)
+        cacher.cache_file_locally(uri, cachename)
         # This differs from medium_to_ghost/medium_post_parser.py in that
         # the __GHOST_URL__ placeholder was introduced, which allows us to use
         # the same image src between normal images and the featured_image.
@@ -147,7 +191,7 @@ all_posts.each {
         debug "    -> #{cachename}"
         debug "    new src #{card['src']}"
 
-        sleep(0.2)
+        sleep(0.25)
     }
 
     if feature_idx
@@ -162,4 +206,5 @@ all_posts.each {
     post['mobiledoc'] = JSON::generate(parsed_mobiledoc)
 }
 
+cacher.finish_all()
 puts JSON::pretty_generate(full_doc)
