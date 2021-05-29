@@ -22,7 +22,8 @@ $settings.process_ranges = []
 
 OptionParser.new {
     |opts|
-    opts.banner = 'Usage: example.rb [options]'
+    app_name = File.basename($0)
+    opts.banner = "Usage: #{app_name} [options] <blogger_export.xml>"
 
     opts.on('-pRANGE', '--process=RANGE',
             'Which post indices to process.  Each value should either be a ' +

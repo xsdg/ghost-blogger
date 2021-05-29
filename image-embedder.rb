@@ -21,7 +21,8 @@ $settings.image_root_path = 'content/migrated_images'
 
 OptionParser.new {
     |opts|
-    opts.banner = 'Usage: example.rb [options]'
+    app_name = File.basename($0)
+    opts.banner = "Usage: #{app_name} [options] <ghost-import.json>"
 
     opts.on('--[no-]duplicate_feature_img',
             'Whether to keep the opening image when setting it as the ' +
