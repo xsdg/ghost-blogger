@@ -13,8 +13,9 @@ require 'uri'
 # Settings and options parsing.
 $settings = (Struct.new(:overwrite_cached_imgs, :duplicate_feature_img,
                         :year_month_subdirs, :image_root_path, :verbose,
-                        :skip_cached_imgs)).new()
+                        :skip_cached_imgs, :max_qps)).new()
 # Defaults
+$settings.max_qps = 4
 $settings.duplicate_feature_img = true
 $settings.overwrite_cached_imgs = false
 $settings.skip_cached_imgs = false
@@ -32,6 +33,11 @@ OptionParser.new {
             'the image appearing twice at the start of each post.') {
         |opt|
         $settings.duplicate_feature_img = opt
+    }
+
+    opts.on('-qQPS', '--max_qps=QPS', OptionParser::DecimalNumeric, 'Max per-host QPS limit') {
+        |opt|
+        $settings.max_qps = opt
     }
 
     opts.on('-oDIR', '--output_dir=DIR', 'Output directory for cached images') {
@@ -75,8 +81,11 @@ end
 
 
 class LocalFileCacher
-    def initialize
+    def initialize(max_qps)
         @connections = {}
+        @last_requests = Hash.new(Time.at(0))
+        @max_qps = max_qps
+        @min_request_period = 1.0 / max_qps
     end
 
     def start_new_connection(hostname)
@@ -104,12 +113,28 @@ class LocalFileCacher
         @connections.clear()
     end
 
+    def sleep_to_limit_qps(uri)
+        now = Time.now
+        last_request = @last_requests[uri.hostname]
+        sleep_duration = (last_request + @min_request_period) - now
+        if sleep_duration > 0
+            debug "  Sleeping for #{sleep_duration} secs to stay under #{@max_qps} QPS for #{uri.hostname}"
+            sleep sleep_duration
+        end
+        @last_requests[uri.hostname] = Time.now
+    end
+
+    # Requests the cacher to ensure that a locally-cached version of the file
+    # exists.
+    #
+    # Sleeps long enough to stay under max_qps for each remote server.
     def cache_file_locally(uri, local_filename)
-        if $settings.skip_cached_imgs and File.exists?(local_filaname)
+        if $settings.skip_cached_imgs and File.exists?(local_filename)
             debug "  File exists locally; skipping…"
             return
         end
 
+        sleep_to_limit_qps(uri)
         http = connection_for_uri(uri)
         if File.exists?(local_filename)
             # Skip downloading if cached file length is as expected.
@@ -161,7 +186,7 @@ end
 
 full_doc = JSON::parse(File.read(ARGV[0]))
 all_posts = full_doc['data']['posts']
-cacher = LocalFileCacher.new()
+cacher = LocalFileCacher.new(max_qps = $settings.max_qps)
 
 all_posts.each {
     |post|
@@ -190,8 +215,6 @@ all_posts.each {
 
         debug "    -> #{cachename}"
         debug "    new src #{card['src']}"
-
-        sleep(0.25)
     }
 
     if feature_idx
