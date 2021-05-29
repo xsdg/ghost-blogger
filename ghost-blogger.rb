@@ -75,6 +75,10 @@ class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :slug_tag, :tags
         hsh = {}
         hsh['id'] = post_idx
         hsh['title'] = title.text
+        if hsh['title'].strip.empty?
+            raise "Post at index #{post_idx} has no title"
+        end
+
         if $settings.wrap_html_in_mobiledoc
             hsh['mobiledoc'] = wrap_content_html_in_mobiledoc(content).to_json
         else
@@ -88,6 +92,10 @@ class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :slug_tag, :tags
             else
                 $stderr.puts "Failed to parse orig_url: \"#{orig_url}\" for post #{title.text}"
             end
+        else
+            # Need to create a slug; cross fingers that it's unique :D
+            hsh['slug'] = hsh['title'].downcase.gsub(/[^a-z0-9]+/, '-')
+            hsh['slug'].gsub!(/(^-)|(-$)/, '')
         end
 
         hsh['featured'] = 0
