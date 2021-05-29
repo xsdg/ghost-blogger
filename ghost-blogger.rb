@@ -70,12 +70,12 @@ def wrap_content_html_in_mobiledoc(content)
     return md
 end
 
-class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :slug_tag, :tags, :content)
+class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :slug_tag, :tags, :content, :draft_flag)
     def to_json(*args)
         hsh = {}
         hsh['id'] = post_idx
         hsh['title'] = title.text
-        if $settings[:wrap_html_in_mobiledoc]
+        if $settings.wrap_html_in_mobiledoc
             hsh['mobiledoc'] = wrap_content_html_in_mobiledoc(content).to_json
         else
             hsh['html'] = content.text
@@ -98,7 +98,12 @@ class Post < Struct.new(:post_idx, :title, :pub_ts, :update_ts, :slug_tag, :tags
         hsh['updated_at'] = update_ts.millis
         hsh['updated_by'] = 1
 
-        if $settings[:publish]
+        if draft_flag and draft_flag.text == 'yes'
+            hsh['status'] = 'draft'
+            if $settings.verbose and $settings.publish
+                $stderr.puts "Keeping draft post #{hsh['title']} as a draft even though we're in publish mode"
+            end
+        elsif $settings.publish
             hsh['status'] = 'published'
             hsh['published_at'] = pub_ts.millis
             hsh['published_by'] = 1
@@ -127,9 +132,10 @@ class EntryHandler < Struct.new(:entry)
         tags = entry.css('entry category[scheme="http://www.blogger.com/atom/ns#"]')
         tags = tags.map {|tag_node| tag_node['term'].gsub(/^"|"$/, '')}
         content = entry.at_css('entry content')
+        draft_flag = entry.at_xpath('.//app:draft', {'app' => 'http://purl.org/atom/app#'})
 
         new_post_idx = $all_posts.length + 1  # posts are 1-indexed.
-        post = Post.new(new_post_idx, title, pub_ts, update_ts, slug_tag, tags, content)
+        post = Post.new(new_post_idx, title, pub_ts, update_ts, slug_tag, tags, content, draft_flag)
 
         $all_posts << post
     end
