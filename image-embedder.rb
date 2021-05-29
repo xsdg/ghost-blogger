@@ -17,7 +17,7 @@ $settings = (Struct.new(:overwrite_cached_imgs, :duplicate_feature_img,
 $settings.overwrite_cached_imgs = false
 $settings.duplicate_feature_img = true
 $settings.year_month_subdirs = true
-$settings.image_root_path = 'exported_content/migrated_images'
+$settings.image_root_path = 'content/migrated_images'
 
 OptionParser.new {
     |opts|
@@ -137,7 +137,7 @@ all_posts.each {
         # This differs from medium_to_ghost/medium_post_parser.py in that
         # the __GHOST_URL__ placeholder was introduced, which allows us to use
         # the same image src between normal images and the featured_image.
-        card['src'] = cachename.sub(/exported_content/,
+        card['src'] = cachename.sub(/content/,
                                     '__GHOST_URL__/content/images')
         card['cardWidth'] = 'wide'  # Non-empty options are "wide" or "full".
 
