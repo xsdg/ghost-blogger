@@ -13,13 +13,15 @@ require 'optparse'
 # Settings and options parsing.
 $settings = (Struct.new(:overwrite_cached_imgs, :duplicate_feature_img,
                         :year_month_subdirs, :image_root_path, :verbose,
-                        :skip_cached_imgs, :max_qps, :rewrites)).new()
+                        :skip_cached_imgs, :max_qps, :rewrites,
+                        :skip_until)).new()
 # Defaults
 $settings.max_qps = 4
 $settings.duplicate_feature_img = true
 $settings.overwrite_cached_imgs = false
 $settings.rewrites = {}
 $settings.skip_cached_imgs = false
+$settings.skip_until = nil
 $settings.year_month_subdirs = true
 $settings.image_root_path = 'content/migrated_images'
 
@@ -71,6 +73,12 @@ OptionParser.new {
         $settings.skip_cached_imgs = opt
     }
 
+    opts.on('--skip_until=SLUG', String,
+            'Do no work until we see SLUG.  This is intended to allow mid-cycle restarts for ' +
+            'arbitrary reasons.') {
+        |opt|
+        $settings.skip_until = opt
+    }
     opts.on("-v", "--[no-]verbose", "Run verbosely") {
         |opt|
         $settings.verbose = opt
@@ -254,6 +262,16 @@ cacher = LocalFileCacher.new(max_qps = $settings.max_qps, host_rewrites=$setting
 
 all_posts.each {
     |post|
+    if $settings.skip_until
+        if post['slug'] != $settings.skip_until
+            debug "Skipping #{post['slug']} (!= #{$settings.skip_until})"
+            next
+        else
+            $stderr.puts 'skip_until is satisfied!'
+            $settings.skip_until = nil
+        end
+    end
+
     $stderr.puts "#{post['slug']}:"
     parsed_mobiledoc = JSON.parse(post['mobiledoc'])
 
