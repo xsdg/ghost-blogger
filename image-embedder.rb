@@ -284,6 +284,7 @@ all_posts.each {
         |(type, card), card_idx|
         next unless type == 'image'
         filename = Addressable::URI.unencode(File.basename(card['src']))
+        filename.gsub!(/[^a-zA-Z0-9._-]/, '_')
         cachename = File.join(image_dir, filename)
         uri = Addressable::URI.parse(card['src'])
 
