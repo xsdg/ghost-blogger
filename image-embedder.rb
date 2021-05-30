@@ -169,25 +169,38 @@ class LocalFileCacher
     end
 
     def should_cache?(uri, local_file_size)
+        if local_file_size == 0
+            if $settings.skip_cached_imgs or not $settings.overwrite_cached_imgs
+                # Higher-priority warning.
+                $stderr.puts "    Force-recaching empty local file"
+            else
+                debug "    Force-recaching empty local file"
+            end
+            return true
+        end
+
+        if $settings.skip_cached_imgs
+            debug "  File exists locally; skipping…"
+            return false
+        end
+
         response = do_request(uri, :head)
         canonical_length = response.content_length
         response.flush
 
         if local_file_size == canonical_length
             debug "  Skipping download of #{uri}; local file is complete"
-            return
+            return false
         else
             size_desc = "local #{local_file_size} versus canonical #{canonical_length}"
             if $settings.overwrite_cached_imgs
                 debug "    Re-caching #{uri}: #{size_desc}"
             else
-                if local_file_size == 0
-                    $stderr.puts "    Force-overwriting empty local file"
-                else
-                    raise "Local cache collision and overwrites are disabled: #{size_desc} for #{uri}"
-                end
+                raise "Local cache collision and overwrites are disabled: #{size_desc} for #{uri}"
             end
         end
+
+        return true
     end
 
     # Requests the cacher to ensure that a locally-cached version of the file
@@ -199,6 +212,7 @@ class LocalFileCacher
             # Skip downloading if cached file length is as expected.
             local_file_size = File.size(local_filename)
 
+            return unless should_cache?(uri, local_file_size)
             if $settings.skip_cached_imgs
                 if local_file_size == 0
                     $stderr.puts "    Force-overwriting empty local file"
