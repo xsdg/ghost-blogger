@@ -216,6 +216,8 @@ class LocalFileCacher
     #
     # Sleeps long enough to stay under max_qps for each remote server.
     def cache_file_locally(uri, local_filename)
+        return if $settings.skip_until
+
         if File.exists?(local_filename)
             # Skip downloading if cached file length is as expected.
             local_file_size = File.size(local_filename)
@@ -262,17 +264,17 @@ cacher = LocalFileCacher.new(max_qps = $settings.max_qps, host_rewrites=$setting
 
 all_posts.each {
     |post|
+    $stderr.puts "#{post['slug']}:"
+
     if $settings.skip_until
         if post['slug'] != $settings.skip_until
-            debug "Skipping #{post['slug']} (!= #{$settings.skip_until})"
-            next
+            debug "  Skipping image downloads (until slug #{$settings.skip_until})"
         else
             $stderr.puts 'skip_until is satisfied!'
             $settings.skip_until = nil
         end
     end
 
-    $stderr.puts "#{post['slug']}:"
     parsed_mobiledoc = JSON.parse(post['mobiledoc'])
 
     feature_idx = nil
@@ -281,7 +283,7 @@ all_posts.each {
     parsed_mobiledoc['cards'].each_with_index {
         |(type, card), card_idx|
         next unless type == 'image'
-        filename = File.basename(card['src'])
+        filename = Addressable::URI.unencode(File.basename(card['src']))
         cachename = File.join(image_dir, filename)
         uri = Addressable::URI.parse(card['src'])
 
