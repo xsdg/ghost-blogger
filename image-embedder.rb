@@ -214,16 +214,12 @@ class LocalFileCacher
         end
 
         # Download and write to local_filename.
-        if $settings.verbose
-            $stderr.print "  Fetching #{uri}…"
-            $stderr.flush()
-        end
+        debug "  Fetching #{uri}…"
         img_response = do_request(uri, :get)
         File.open(local_filename, 'w') {
             |local_file|
             local_file.write(img_response.body)
         }
-        debug " done!"
     end
 end
 
