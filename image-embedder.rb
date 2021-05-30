@@ -4,20 +4,21 @@
 # is embedded in the zip file, the feature images will not be picked up
 # correctly.
 
+require 'addressable/uri'
 require 'fileutils'
+require 'http'
 require 'json'
-require 'net/http'
 require 'optparse'
-require 'uri'
 
 # Settings and options parsing.
 $settings = (Struct.new(:overwrite_cached_imgs, :duplicate_feature_img,
                         :year_month_subdirs, :image_root_path, :verbose,
-                        :skip_cached_imgs, :max_qps)).new()
+                        :skip_cached_imgs, :max_qps, :rewrites)).new()
 # Defaults
 $settings.max_qps = 4
 $settings.duplicate_feature_img = true
 $settings.overwrite_cached_imgs = false
+$settings.rewrites = {}
 $settings.skip_cached_imgs = false
 $settings.year_month_subdirs = true
 $settings.image_root_path = 'content/migrated_images'
@@ -46,9 +47,22 @@ OptionParser.new {
     }
 
     opts.on('--[no-]overwrite_cached_imgs',
-            'Whether to overwrite mismatching previously-cached images') {
+            'Whether to overwrite mismatching previously-cached images.  ' +
+            'Note that empty local images will be overwritten regardless.') {
         |opt|
         $settings.overwrite_cached_imgs = opt
+    }
+
+    opts.on('--rewrite=RULE',
+            'Rewrites hosts to other hosts.  Should have format ' +
+            '"hostname1 hostname2" to rewrite hostname1 as hostname2 prior ' +
+            'to fetching.  May be repeated.') {
+        |opt|
+        if opt =~ /^(\S+)\s+(\S+)$/
+            $settings.rewrites[$1] = $2
+        else
+            raise "Failed to parse --rewrite rule \"#{opt}\""
+        end
     }
 
     opts.on('--[no-]skip_cached_imgs',
@@ -81,34 +95,45 @@ end
 
 
 class LocalFileCacher
-    def initialize(max_qps)
+    def initialize(max_qps, host_rewrites = {})
         @connections = {}
         @last_requests = Hash.new(Time.at(0))
         @max_qps = max_qps
         @min_request_period = 1.0 / max_qps
+
+        # Hash that returns the specified key as the default value.
+        @maybe_rewrite_host = Hash.new {|h,k| k}
+        @maybe_rewrite_host.merge!(host_rewrites)
     end
 
-    def start_new_connection(hostname)
-        http = Net::HTTP.new(hostname)
-        @connections[hostname] = http
-        http.start
+    def start_new_connection(uri)
+        # uri.site includes the scheme.
+        http = HTTP.persistent(uri.site)
+        @connections[uri.hostname] = http
         return http
     end
 
     def connection_for_uri(uri)
-        unless @connections.has_key? uri.hostname
-            return start_new_connection(uri.hostname)
+        hostname = @maybe_rewrite_host[uri.hostname]
+
+        if hostname != uri.hostname
+            uri = uri.dup  # Avoid modifying the original.
+            uri.host = hostname
+        end
+
+        unless @connections.has_key? hostname
+            return start_new_connection(uri)
         end
 
         # FIXME: Any way to determine if this connection is still up?
-        old_http = @connections[uri.hostname]
+        old_http = @connections[hostname]
         return old_http
     end
 
     def finish_all()
         @connections.each {
             |hostname, http|
-            http.finish()
+            http.close()
         }
         @connections.clear()
     end
@@ -124,37 +149,68 @@ class LocalFileCacher
         @last_requests[uri.hostname] = Time.now
     end
 
+    # Call like do_request(some_uri, :head)
+    # Returns a HTTP::Response.
+    def do_request(uri, request_type)
+        sleep_to_limit_qps(uri)
+        http = connection_for_uri(uri)
+        response = http.send(request_type, uri.path)
+
+        # Follow isn't consistent with persistent, since we need to connect to a
+        # different host.  So we necessarily start a new connection.
+        if response.status.redirect?
+            response.flush
+            response = HTTP.follow.send(request_type, uri)
+        end
+        if not response.status.success?
+            raise "Failed #{request_type} query on #{uri}: #{response.status}"
+        end
+        return response
+    end
+
+    def should_cache?(uri, local_file_size)
+        response = do_request(uri, :head)
+        canonical_length = response.content_length
+        response.flush
+
+        if local_file_size == canonical_length
+            debug "  Skipping download of #{uri}; local file is complete"
+            return
+        else
+            size_desc = "local #{local_file_size} versus canonical #{canonical_length}"
+            if $settings.overwrite_cached_imgs
+                debug "    Re-caching #{uri}: #{size_desc}"
+            else
+                if local_file_size == 0
+                    $stderr.puts "    Force-overwriting empty local file"
+                else
+                    raise "Local cache collision and overwrites are disabled: #{size_desc} for #{uri}"
+                end
+            end
+        end
+    end
+
     # Requests the cacher to ensure that a locally-cached version of the file
     # exists.
     #
     # Sleeps long enough to stay under max_qps for each remote server.
     def cache_file_locally(uri, local_filename)
-        if $settings.skip_cached_imgs and File.exists?(local_filename)
-            debug "  File exists locally; skipping…"
-            return
-        end
-
-        sleep_to_limit_qps(uri)
-        http = connection_for_uri(uri)
         if File.exists?(local_filename)
             # Skip downloading if cached file length is as expected.
             local_file_size = File.size(local_filename)
 
-            http.request_head(uri.path) {
-                |response|
-                canonical_length = response['Content-Length'].to_i
-                if local_file_size == canonical_length
-                    debug "  Skipping download of #{uri}; local file is complete"
-                    return
+            if $settings.skip_cached_imgs
+                if local_file_size == 0
+                    $stderr.puts "    Force-overwriting empty local file"
                 else
-                    size_desc = "local #{local_file_size} versus canonical #{canonical_length}"
-                    if $settings.overwrite_cached_imgs
-                        debug "    Re-caching #{uri}: #{size_desc}"
-                    else
-                        raise "Local cache collision and overwrites are disabled: #{size_desc} for #{uri}"
-                    end
+                    debug "  File exists locally; skipping…"
+                    return
                 end
-            }
+            else
+                if not should_cache?(uri, local_file_size)
+                    return
+                end
+            end
         end
 
         # Download and write to local_filename.
@@ -162,12 +218,10 @@ class LocalFileCacher
             $stderr.print "  Fetching #{uri}…"
             $stderr.flush()
         end
-        http.request_get(uri.path) {
-            |response|
-            File.open(local_filename, 'w') {
-                |local_file|
-                local_file.write(response.body())
-            }
+        img_response = do_request(uri, :get)
+        File.open(local_filename, 'w') {
+            |local_file|
+            local_file.write(img_response.body)
         }
         debug " done!"
     end
@@ -186,7 +240,7 @@ end
 
 full_doc = JSON::parse(File.read(ARGV[0]))
 all_posts = full_doc['data']['posts']
-cacher = LocalFileCacher.new(max_qps = $settings.max_qps)
+cacher = LocalFileCacher.new(max_qps = $settings.max_qps, host_rewrites=$settings.rewrites)
 
 all_posts.each {
     |post|
@@ -201,7 +255,7 @@ all_posts.each {
         next unless type == 'image'
         filename = File.basename(card['src'])
         cachename = File.join(image_dir, filename)
-        uri = URI(card['src'])
+        uri = Addressable::URI.parse(card['src'])
 
         cacher.cache_file_locally(uri, cachename)
         # This differs from medium_to_ghost/medium_post_parser.py in that
