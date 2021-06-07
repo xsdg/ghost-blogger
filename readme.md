@@ -48,7 +48,7 @@ you can see them with `ghost-blogger.rb --help` or `image-embedder.rb --help`.
 
 ## License
 
-This project is licensed under the Apache2 License - see the LICENSE.md file for details
+This project is licensed under the Apache License v2.0 - see the LICENSE file for details
 
 ## Acknowledgments
 
